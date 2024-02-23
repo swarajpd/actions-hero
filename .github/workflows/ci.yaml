@@ -1,10 +1,6 @@
 name: Java CI Pipeline with Maven
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+on: [ push, pull_request ]
 
 jobs:
   # Checks whether the commit message corresponds to the conventional commits
