@@ -1,0 +1,133 @@
+name: Java CI Pipeline with Maven
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Checks whether the commit message corresponds to the conventional commits
+  # https://www.conventionalcommits.org/en/v1.0.0/
+  commit-message-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate commit messages
+        run: |
+          commit_regex="${{ vars.COMMIT_REGEX }}"
+          for commit in $(git rev-list --no-merges HEAD); do
+            message=$(git log --format=%B -n 1 $commit)
+            if ! [[ $message =~ $commit_regex ]]; then 
+              echo "Invalid commit message: $message"
+              exit 1
+            fi
+          done
+
+  test:
+    runs-on: ubuntu-latest
+    needs: commit-message-validation
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v1
+        with:
+          java-version: 21
+      - name: Test with Maven
+        run: mvn test
+
+  semantic-release:
+    runs-on: ubuntu-latest
+    #    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          npm install -g \
+          semantic-release  \
+          @semantic-release/git  \
+          @semantic-release/github  \
+          @semantic-release/changelog  \
+          @semantic-release/exec \
+          @semantic-release/commit-analyzer \
+          @semantic-release/release-notes-generator \
+          conventional-changelog-conventionalcommits
+      - name: Semantic Release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: npx semantic-release --branches main
+      - name: Upload new version
+        uses: actions/upload-artifact@v3
+        with:
+          name: version
+          path: version.txt
+
+  set_version:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: semantic-release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v1
+        with:
+          java-version: 21
+      - name: Download new version
+        uses: actions/download-artifact@v4
+        with:
+          name: version
+          path: ./
+      - name: Set new version pom.xml
+        run: |
+          git pull
+          mvn versions:set -DnewVersion=$(cat version.txt)
+          git add pom.xml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git commit -m "ci: set version to $(cat version.txt)"
+          git push
+
+#  docker-build-push:
+#    runs-on: ubuntu-latest
+#    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+#    needs: set_version
+#    steps:
+#      - uses: actions/checkout@v4
+#      - name: Set up JDK 21
+#        uses: actions/setup-java@v1
+#        with:
+#          java-version: 21
+#      - name: Build with Maven
+#        run: |
+#          git pull
+#          mvn clean install
+#      - name: Download new version
+#        uses: actions/download-artifact@v3
+#        with:
+#          name: version
+#          path: ./
+#      - name: Configure AWS credentials
+#        uses: aws-actions/configure-aws-credentials@v2
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: eu-central-1
+#      - name: Login to Amazon ECR Public
+#        id: login-ecr
+#        uses: aws-actions/amazon-ecr-login@v1
+#      - name: Build, tag, and push docker image to Amazon ECR
+#        env:
+#          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#          REPOSITORY: ${{ vars.REPOSITORY }}
+#        run: |
+#          IMAGE_TAG="$(cat version.txt)"
+#          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+#          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
