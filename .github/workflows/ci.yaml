@@ -1,10 +1,6 @@
 name: Java CI Pipeline with Maven
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+on: [ push, pull_request ]
 
 jobs:
   # Checks whether the commit message corresponds to the conventional commits
@@ -38,7 +34,7 @@ jobs:
 
   semantic-release:
     runs-on: ubuntu-latest
-    #    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: test
     steps:
       - name: Checkout code
